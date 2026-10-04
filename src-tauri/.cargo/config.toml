@@ -1,0 +1,10 @@
+# 本机直连 crates.io 索引很慢（单次请求 5–11 秒），这里改用 rsproxy 稀疏镜像加速。
+# 如果所在网络访问 crates.io 正常，可以直接删除本文件，Cargo 会回到官方源。
+[source.crates-io]
+replace-with = "rsproxy-sparse"
+
+[source.rsproxy-sparse]
+registry = "sparse+https://rsproxy.cn/index/"
+
+[registries.rsproxy]
+index = "sparse+https://rsproxy.cn/index/"
