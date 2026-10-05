@@ -10,8 +10,8 @@ Windows 桌面端的**本地快捷方式管理器**：把常用的应用、网�
 
 | 版本 | 文件 | 说明 |
 | --- | --- | --- |
-| 安装版 | [`快捷管理_3.0.0_x64-setup.exe`](./docs/releases/快捷管理_3.0.0_x64-setup.exe) | 双击按向导安装，装到当前用户目录，**不需要管理员权限**；会创建开始菜单与桌面快捷方式 |
-| 便携版 | [`快捷管理-便携版.zip`](./docs/releases/快捷管理-便携版.zip) | 解压即用，数据写在程序旁边的 `data\` 目录，可放 U 盘随身携带 |
+| 安装版 | [`快捷管理_3.0.0_x64-setup.exe`](https://github.com/waiseset/Quick-Management/releases/download/3.0/Quick-Management.3.0.x64-setup.exe) | 双击按向导安装，装到当前用户目录，**不需要管理员权限**；会创建开始菜单与桌面快捷方式 |
+| 便携版 | [`快捷管理-便携版.zip`](https://github.com/waiseset/Quick-Management/releases/download/3.0/Quick-Management.3.0.x64.zip) | 解压即用，数据写在程序旁边的 `data\` 目录，可放 U 盘随身携带 |
 
 系统要求：Windows 10 / 11（依赖系统自带的 WebView2 运行时，一般无需额外安装）。
 
