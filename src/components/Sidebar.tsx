@@ -6,7 +6,7 @@ import { useApp } from "../store";
 import { ALL_CATEGORY_ID, FAVORITES_CATEGORY_ID } from "../types";
 import type { Category } from "../types";
 import { useUi } from "../ui";
-import { cx } from "../util";
+import { countUnique, cx } from "../util";
 import { useContextMenu } from "./ContextMenu";
 
 /** 参考文档 A 列：收藏夹 / 全部 / 一级分类列表；A 列空白处右键只有「添加」 */
@@ -27,13 +27,14 @@ export function Sidebar() {
   const { prompt, choose } = useUi();
 
   const ids = useMemo(() => categories.map((category) => category.id), [categories]);
-  const { handlers, containerProps, activeId, overId } = useDragList<HTMLDivElement>(
-    ids,
-    reorderCategories,
-  );
+  const { handlers, activeId, overId, consumeDragClick } = useDragList(ids, reorderCategories);
 
+  // 计数时把完全重复的算作一个，且不包含隐藏的条目
+  const visible = data.items.filter((item) => !item.hidden);
   const countOf = (categoryId: string) =>
-    data.items.filter((item) => item.categoryId === categoryId).length;
+    countUnique(visible.filter((item) => item.categoryIds.includes(categoryId)));
+  const favoritesCount = countUnique(visible.filter((item) => item.favorite));
+  const totalCount = countUnique(visible);
 
   // 提醒 / 数据管理 / 关于 这些页面不属于任何分类，因此不显示选中色
   const isMain = view === "main";
@@ -128,7 +129,7 @@ export function Sidebar() {
         });
       }}
     >
-      <nav className="sidebar-list" {...containerProps}>
+      <nav className="sidebar-list">
         <button
           type="button"
           className={cx(
@@ -139,6 +140,7 @@ export function Sidebar() {
         >
           <span className="sidebar-mark sidebar-mark-star">★</span>
           <span className="sidebar-label">收藏夹</span>
+          <span className="sidebar-count">{favoritesCount}</span>
         </button>
 
         <button
@@ -151,6 +153,7 @@ export function Sidebar() {
         >
           <span className="sidebar-mark">▦</span>
           <span className="sidebar-label">全部</span>
+          <span className="sidebar-count">{totalCount}</span>
         </button>
 
         <div className="sidebar-divider" />
@@ -158,6 +161,7 @@ export function Sidebar() {
         {categories.map((category) => (
           <div
             key={category.id}
+            data-drag-id={category.id}
             className={cx(
               "sidebar-item",
               "is-draggable",
@@ -165,7 +169,10 @@ export function Sidebar() {
               activeId === category.id && "is-dragging",
               overId === category.id && "is-drop-target",
             )}
-            onClick={() => selectCategory(category.id)}
+            onClick={() => {
+              if (consumeDragClick()) return;
+              selectCategory(category.id);
+            }}
             onContextMenu={(event) => openCategoryMenu(event, category)}
             {...handlers(category.id)}
           >

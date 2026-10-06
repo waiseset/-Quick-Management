@@ -1,9 +1,9 @@
 import { useState } from "react";
 
-import { chooseExecutable, chooseImage, fetchFavicon, openItem, pickIconFromPath, revealInExplorer } from "../api";
+import { chooseExecutable, chooseFile, chooseImage, fetchFavicon, openItem, pickIconFromPath, resolveTarget, revealInExplorer } from "../api";
 import { useApp } from "../store";
 import type { IconData, Item, ItemKind } from "../types";
-import { baseName, cx, hostOf, iconSrc, sortByOrder } from "../util";
+import { baseName, cx, fileName, hostOf, iconSrc, sortByOrder } from "../util";
 import { Modal } from "./Modal";
 
 export interface ItemDraft {
@@ -11,8 +11,8 @@ export interface ItemDraft {
   name: string;
   description: string;
   target: string;
-  categoryId: string | null;
-  subcategoryId: string | null;
+  categoryIds: string[];
+  subcategoryIds: string[];
   favorite: boolean;
   icon: IconData | null;
 }
@@ -20,15 +20,15 @@ export interface ItemDraft {
 export function ItemEditor({
   item,
   defaultKind = "app",
-  defaultCategoryId = null,
-  defaultSubCategoryId = null,
+  defaultCategoryIds = [],
+  defaultSubCategoryIds = [],
   onClose,
   onSubmit,
 }: {
   item: Item | null;
   defaultKind?: ItemKind;
-  defaultCategoryId?: string | null;
-  defaultSubCategoryId?: string | null;
+  defaultCategoryIds?: string[];
+  defaultSubCategoryIds?: string[];
   onClose: () => void;
   onSubmit: (draft: ItemDraft) => void;
 }) {
@@ -37,16 +37,22 @@ export function ItemEditor({
   const [name, setName] = useState(item?.name ?? "");
   const [description, setDescription] = useState(item?.description ?? "");
   const [target, setTarget] = useState(item?.target ?? "");
-  const [categoryId, setCategoryId] = useState<string>(item?.categoryId ?? defaultCategoryId ?? "");
-  const [subcategoryId, setSubcategoryId] = useState<string>(
-    item?.subcategoryId ?? defaultSubCategoryId ?? "",
+  const [categoryIds, setCategoryIds] = useState<string[]>(
+    item?.categoryIds ?? defaultCategoryIds,
+  );
+  const [subcategoryIds, setSubcategoryIds] = useState<string[]>(
+    item?.subcategoryIds ?? defaultSubCategoryIds,
   );
   const [favorite, setFavorite] = useState(item?.favorite ?? false);
   const [icon, setIcon] = useState<IconData | null>(item?.icon ?? null);
   const [busy, setBusy] = useState<"icon" | "favicon" | null>(null);
 
-  const category = categories.find((entry) => entry.id === categoryId) ?? null;
-  const subs = category ? sortByOrder(category.subcategories) : [];
+  // 二级分类列出所有已选分类下的子分类
+  const subs = sortByOrder(
+    categories
+      .filter((entry) => categoryIds.includes(entry.id))
+      .flatMap((entry) => entry.subcategories),
+  );
 
   const report = (error: unknown) =>
     showToast(typeof error === "string" ? error : "操作失败，请稍后重试");
@@ -81,13 +87,14 @@ export function ItemEditor({
     }
   };
 
-  /** 选择应用：自动填名称并提取图标 */
-  const browseApplication = async () => {
-    const picked = await chooseExecutable();
+  /** 选择路径：应用 / 文件用不同对话框；选到快捷方式时自动定位到它指向的真实文件 */
+  const browseTarget = async () => {
+    const picked = kind === "file" ? await chooseFile() : await chooseExecutable();
     if (!picked) return;
-    setTarget(picked);
-    if (!name.trim()) setName(baseName(picked));
-    await extractIcon(picked);
+    const resolved = (await resolveTarget(picked)) ?? picked;
+    setTarget(resolved);
+    if (!name.trim()) setName(kind === "file" ? fileName(resolved) : baseName(resolved));
+    await extractIcon(resolved);
   };
 
   const browseImage = async () => {
@@ -108,8 +115,8 @@ export function ItemEditor({
       name: name.trim() || (kind === "app" ? baseName(trimmed) : hostOf(trimmed)),
       description: description.trim(),
       target: trimmed,
-      categoryId: categoryId || null,
-      subcategoryId: subcategoryId || null,
+      categoryIds,
+      subcategoryIds,
       favorite,
       icon,
     });
@@ -160,6 +167,13 @@ export function ItemEditor({
         </button>
         <button
           type="button"
+          className={cx("segment", kind === "file" && "is-active")}
+          onClick={() => switchKind("file")}
+        >
+          文件
+        </button>
+        <button
+          type="button"
           className={cx("segment", kind === "url" && "is-active")}
           onClick={() => switchKind("url")}
         >
@@ -172,28 +186,42 @@ export function ItemEditor({
         <input
           className="input"
           value={name}
-          placeholder={kind === "app" ? "例如：Visual Studio Code" : "例如：MDN"}
+          placeholder={
+            kind === "app"
+              ? "例如：Visual Studio Code"
+              : kind === "file"
+                ? "例如：季度报告.pdf"
+                : "例如：MDN"
+          }
           onChange={(event) => setName(event.target.value)}
         />
       </label>
 
       <label className="field">
-        <span className="field-label">{kind === "app" ? "路径" : "网址"}</span>
+        <span className="field-label">
+          {kind === "app" ? "路径" : kind === "file" ? "文件路径" : "网址"}
+        </span>
         <div className="input-row">
           <input
             className="input"
             value={target}
-            placeholder={kind === "app" ? "C:\\Program Files\\App\\App.exe" : "https://example.com"}
+            placeholder={
+              kind === "app"
+                ? "C:\\Program Files\\App\\App.exe"
+                : kind === "file"
+                  ? "C:\\Users\\你\\Documents\\报告.pdf"
+                  : "https://example.com"
+            }
             onChange={(event) => setTarget(event.target.value)}
             onBlur={() => {
               if (kind === "url" && target.trim() && !icon) void grabFavicon();
             }}
           />
-          {kind === "app" ? (
-            <button type="button" className="btn btn-small" onClick={() => void browseApplication()}>
+          {kind === "url" ? null : (
+            <button type="button" className="btn btn-small" onClick={() => void browseTarget()}>
               浏览…
             </button>
-          ) : null}
+          )}
         </div>
       </label>
 
@@ -222,7 +250,16 @@ export function ItemEditor({
             <button type="button" className="btn btn-small" onClick={() => void browseImage()}>
               选择图片
             </button>
-            {kind === "app" ? (
+            {kind === "url" ? (
+              <button
+                type="button"
+                className="btn btn-small"
+                disabled={!target.trim() || busy === "favicon"}
+                onClick={() => void grabFavicon()}
+              >
+                {busy === "favicon" ? "抓取中…" : "抓取网站图标"}
+              </button>
+            ) : (
               <button
                 type="button"
                 className="btn btn-small"
@@ -230,15 +267,6 @@ export function ItemEditor({
                 onClick={() => void extractIcon(target.trim())}
               >
                 {busy === "icon" ? "提取中…" : "提取图标"}
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="btn btn-small"
-                disabled={!target.trim() || busy === "favicon"}
-                onClick={() => void grabFavicon()}
-              >
-                {busy === "favicon" ? "抓取中…" : "抓取 favicon"}
               </button>
             )}
             {icon ? (
@@ -251,40 +279,58 @@ export function ItemEditor({
       </div>
 
       <div className="field-row">
-        <label className="field">
-          <span className="field-label">分类</span>
-          <select
-            className="input"
-            value={categoryId}
-            onChange={(event) => {
-              setCategoryId(event.target.value);
-              setSubcategoryId("");
-            }}
-          >
-            <option value="">未分类</option>
-            {categories.map((entry) => (
-              <option key={entry.id} value={entry.id}>
-                {entry.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span className="field-label">子分类</span>
-          <select
-            className="input"
-            value={subcategoryId}
-            disabled={!category}
-            onChange={(event) => setSubcategoryId(event.target.value)}
-          >
-            <option value="">无</option>
-            {subs.map((sub) => (
-              <option key={sub.id} value={sub.id}>
-                {sub.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="field">
+          <span className="field-label">分类（可多选）</span>
+          <div className="chip-picker">
+            {categories.length === 0 ? (
+              <span className="field-hint">还没有分类，请先在左侧新建</span>
+            ) : (
+              categories.map((entry) => (
+                <button
+                  key={entry.id}
+                  type="button"
+                  className={cx("chip", categoryIds.includes(entry.id) && "is-active")}
+                  onClick={() =>
+                    setCategoryIds((list) =>
+                      list.includes(entry.id)
+                        ? list.filter((id) => id !== entry.id)
+                        : [...list, entry.id],
+                    )
+                  }
+                >
+                  {entry.name}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+        <div className="field">
+          <span className="field-label">二级分类（可多选）</span>
+          <div className="chip-picker">
+            {subs.length === 0 ? (
+              <span className="field-hint">
+                {categoryIds.length === 0 ? "先选一个分类" : "所选分类下还没有二级分类"}
+              </span>
+            ) : (
+              subs.map((sub) => (
+                <button
+                  key={sub.id}
+                  type="button"
+                  className={cx("chip", subcategoryIds.includes(sub.id) && "is-active")}
+                  onClick={() =>
+                    setSubcategoryIds((list) =>
+                      list.includes(sub.id)
+                        ? list.filter((id) => id !== sub.id)
+                        : [...list, sub.id],
+                    )
+                  }
+                >
+                  {sub.name}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
       </div>
 
       <button

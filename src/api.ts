@@ -105,6 +105,27 @@ export async function importData(path: string): Promise<AppData> {
   throw new Error("浏览器预览模式无法读取本地文件，请在桌面版中使用");
 }
 
+/** 解析快捷方式：.lnk 返回它指向的路径，.url 返回其中的网址，其它文件返回 null */
+export async function resolveTarget(path: string): Promise<string | null> {
+  if (!isTauri()) return null;
+  return await invoke<string | null>("resolve_target", { path });
+}
+
+/** 计算隐藏区密码的哈希（在 Rust 侧算，WebView 不保证有 crypto.subtle） */
+export async function hashPassword(password: string, salt: string): Promise<string> {
+  if (!isTauri()) {
+    // 浏览器预览模式下做个占位哈希，方便调界面
+    return `preview-${salt}-${password.length}`;
+  }
+  return await invoke<string>("hash_password", { password, salt });
+}
+
+/** 生成新的随机盐 */
+export async function makeSalt(): Promise<string> {
+  if (!isTauri()) return "preview-salt";
+  return await invoke<string>("make_salt");
+}
+
 /** 当前数据文件位置与是否便携模式 */
 export async function dataLocation(): Promise<DataLocation | null> {
   if (!isTauri()) return null;
@@ -122,6 +143,30 @@ export async function chooseExecutable(): Promise<string | null> {
     filters: [{ name: "应用程序", extensions: EXE_FILTER }],
   });
   return typeof picked === "string" ? picked : null;
+}
+
+/** 选择任意文件（用系统默认程序打开） */
+export async function chooseFile(): Promise<string | null> {
+  if (!isTauri()) return null;
+  const picked = await openDialog({
+    title: "选择文件",
+    multiple: false,
+    directory: false,
+  });
+  return typeof picked === "string" ? picked : null;
+}
+
+/** 一次选择多个应用（批量添加用） */
+export async function chooseExecutables(): Promise<string[]> {
+  if (!isTauri()) return [];
+  const picked = await openDialog({
+    title: "选择应用（可按住 Ctrl / Shift 多选）",
+    multiple: true,
+    directory: false,
+    filters: [{ name: "应用程序", extensions: EXE_FILTER }],
+  });
+  if (!picked) return [];
+  return Array.isArray(picked) ? picked : [picked];
 }
 
 export async function chooseImage(): Promise<string | null> {

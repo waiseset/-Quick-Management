@@ -3,11 +3,13 @@ import type { ReactNode } from "react";
 
 export interface MenuItem {
   key: string;
-  label: string;
+  label?: string;
   /** 右侧灰字提示（例如路径） */
   hint?: string;
   danger?: boolean;
   disabled?: boolean;
+  /** 分隔线：只占据一行高度，不响应点击 */
+  separator?: boolean;
   onSelect?: () => void;
 }
 
@@ -103,21 +105,25 @@ function ContextMenu({ x, y, header, items, onClose }: OpenMenu & { onClose: () 
       >
         {header ? <div className="context-menu-header">{header}</div> : null}
         <div className="context-menu-items">
-          {items.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              className={`context-menu-item${item.danger ? " is-danger" : ""}`}
-              disabled={item.disabled}
-              onClick={() => {
-                onClose();
-                item.onSelect?.();
-              }}
-            >
-              <span className="context-menu-label">{item.label}</span>
-              {item.hint ? <span className="context-menu-hint">{item.hint}</span> : null}
-            </button>
-          ))}
+          {items.map((item) =>
+            item.separator ? (
+              <div key={item.key} className="context-menu-separator" />
+            ) : (
+              <button
+                key={item.key}
+                type="button"
+                className={`context-menu-item${item.danger ? " is-danger" : ""}`}
+                disabled={item.disabled}
+                onClick={() => {
+                  onClose();
+                  item.onSelect?.();
+                }}
+              >
+                <span className="context-menu-label">{item.label}</span>
+                {item.hint ? <span className="context-menu-hint">{item.hint}</span> : null}
+              </button>
+            ),
+          )}
         </div>
       </div>
     </>

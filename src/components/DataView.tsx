@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { chooseExportPath, chooseImportPath, dataLocation, exportData, importData } from "../api";
+import { chooseExportPath, chooseImportPath, dataLocation, exportData, importData, pickIconFromPath } from "../api";
 import { useApp } from "../store";
 import type { AppData, DataLocation } from "../types";
 import { ConfirmDialog } from "./Modal";
@@ -10,10 +10,11 @@ import { ConfirmDialog } from "./Modal";
  * 导出与导入都会自动弹出系统文件对话框。
  */
 export function DataView() {
-  const { data, replaceAll, clearData, showToast } = useApp();
+  const { data, replaceAll, clearData, updateItem, showToast } = useApp();
   const [busy, setBusy] = useState<"export" | "import" | null>(null);
   const [pendingImport, setPendingImport] = useState<AppData | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [location, setLocation] = useState<DataLocation | null>(null);
 
   useEffect(() => {
@@ -60,6 +61,29 @@ export function DataView() {
     }
   };
 
+  /** 重新为所有应用条目提取系统图标（图标过小或过旧时用来一次性刷新） */
+  const refreshIcons = async () => {
+    const targets = data.items.filter((item) => item.kind === "app" && item.target.trim());
+    if (!targets.length) {
+      showToast("没有可处理的「应用」条目");
+      return;
+    }
+    setRefreshing(true);
+    let done = 0;
+    let failed = 0;
+    for (const item of targets) {
+      try {
+        const icon = await pickIconFromPath(item.target);
+        updateItem(item.id, { icon });
+        done += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    setRefreshing(false);
+    showToast(failed ? `已更新 ${done} 个图标，${failed} 个提取失败` : `已更新 ${done} 个图标`);
+  };
+
   return (
     <section className="view">
       <div className="view-body">
@@ -101,6 +125,22 @@ export function DataView() {
             onClick={() => void runImport()}
           >
             {busy === "import" ? "读取中…" : "导入"}
+          </button>
+        </div>
+
+        <div className="panel">
+          <h2 className="panel-title">维护</h2>
+          <p className="panel-text">
+            重新为所有「应用」条目提取一次系统图标。如果某条目的图标显示得过小、或者想套用新的图标提取规则，
+            可以在这里一次性刷新，不必逐个右键更换。
+          </p>
+          <button
+            type="button"
+            className="btn"
+            disabled={refreshing}
+            onClick={() => void refreshIcons()}
+          >
+            {refreshing ? "提取中…" : "重新提取全部图标"}
           </button>
         </div>
 

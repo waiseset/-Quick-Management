@@ -38,9 +38,10 @@ export function demoData(): AppData {
     description,
     kind,
     target,
-    categoryId,
-    subcategoryId,
+    categoryIds: categoryId ? [categoryId] : [],
+    subcategoryIds: subcategoryId ? [subcategoryId] : [],
     favorite,
+    hidden: false,
     icon: icon(color, label),
     order,
     createdAt: Date.now() - order * 86_400_000,
@@ -62,6 +63,8 @@ export function demoData(): AppData {
     ],
     items: [
       item("i-1", "Visual Studio Code", "写代码的主力编辑器，装了 Vim 与 Rust 插件。", "app", "C:\\Program Files\\Microsoft VS Code\\Code.exe", "c-dev", "s-editor", 0, true, "#2f7ce0", "VS"),
+      // 与 i-1 类型 / 名称 / 路径完全一致，用来验证「完全相同的条目只显示一个」
+      item("i-1-dup", "Visual Studio Code", "写代码的主力编辑器，装了 Vim 与 Rust 插件。", "app", "C:\\Program Files\\Microsoft VS Code\\Code.exe", "c-dev", "s-editor", 1, true, "#2f7ce0", "VS"),
       item("i-2", "Windows Terminal", "多标签终端，默认开 PowerShell 7。", "app", "C:\\Program Files\\WindowsApps\\wt.exe", "c-dev", "s-terminal", 1, true, "#3d3d3d", ">_"),
       item("i-3", "Figma", "在线设计稿，团队共享链接在这里。", "url", "https://www.figma.com", "c-design", "s-graphics", 2, true, "#a259ff", "F"),
       item("i-4", "Coolors", "快速生成配色方案。", "url", "https://coolors.co", "c-design", "s-color", 3, false, "#1f9d8f", "C"),
@@ -71,6 +74,6 @@ export function demoData(): AppData {
       item("i-8", "记事本", "临时记录。", "app", "C:\\Windows\\System32\\notepad.exe", null, null, 7, false, "#5b7fa6", "N"),
       item("i-9", "设计规范", "团队设计规范的在线文档，和「学习」下的文档同名子分类。", "url", "https://example.com/design-spec", "c-design", "s-doc2", 8, false, "#6b7280", "D"),
     ],
-    settings: { theme: "light", permanentlyIgnored: ["i-7"] },
+    settings: { theme: "light", permanentlyIgnored: ["i-7"], vault: null },
   };
 }

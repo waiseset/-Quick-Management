@@ -16,11 +16,28 @@ const MAX_IMAGE: usize = 4 * 1024 * 1024;
 const ICON_MAX: u32 = 256;
 
 fn agent() -> ureq::Agent {
+    // 必须显式指定 TLS provider：ureq 的默认值是 Rustls，
+    // 而本项目关掉了默认 features、改用 native-tls（走系统 SChannel），
+    // 不显式设置运行时会 panic：provider is Rustls but feature is not enabled: rustls
     ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(12)))
         .user_agent(UA)
+        .tls_config(
+            ureq::tls::TlsConfig::builder()
+                .provider(ureq::tls::TlsProvider::NativeTls)
+                .build(),
+        )
         .build()
         .into()
+}
+
+/// 把底层网络错误压成一句中文提示，不把内部的英文报错抛给用户
+fn friendly_error(url: &str) -> String {
+    let host = url.split("://").nth(1).and_then(|rest| rest.split('/').next());
+    match host {
+        Some(host) => format!("无法访问 {host}"),
+        None => "无法访问该网址".to_string(),
+    }
 }
 
 fn http_get(url: &str, limit: usize) -> Result<(Vec<u8>, String, Option<String>), String> {
@@ -63,7 +80,7 @@ fn normalize(input: &str) -> Result<Url, String> {
 
 pub fn fetch(input: &str) -> Result<IconData, String> {
     let page = normalize(input)?;
-    let mut errors: Vec<String> = Vec::new();
+    let mut last_error: Option<String> = None;
 
     // 1) 解析首页声明的图标
     match http_get(page.as_str(), MAX_HTML) {
@@ -75,24 +92,24 @@ pub fn fetch(input: &str) -> Result<IconData, String> {
                         Ok((bytes, mime, _)) => {
                             return encode(&bytes, &mime, icon_url.as_str());
                         }
-                        Err(e) => errors.push(e),
+                        Err(error) => last_error = Some(error),
                     },
-                    Err(e) => errors.push(format!("图标地址无效: {e}")),
+                    Err(error) => last_error = Some(format!("图标地址无效: {error}")),
                 }
             }
         }
-        Err(e) => errors.push(e),
+        Err(error) => last_error = Some(error),
     }
 
     // 2) 回退到 /favicon.ico
     let fallback = page
         .join("/favicon.ico")
-        .map_err(|e| format!("无法构造 favicon 地址: {e}"))?;
+        .map_err(|e| format!("无法构造图标地址: {e}"))?;
     match http_get(fallback.as_str(), MAX_IMAGE) {
         Ok((bytes, mime, _)) => encode(&bytes, &mime, fallback.as_str()),
-        Err(e) => {
-            errors.push(e);
-            Err(format!("未能获取图标：{}", errors.join("；")))
+        Err(_) => {
+            let _ = last_error;
+            Err(friendly_error(page.as_str()))
         }
     }
 }
@@ -116,8 +133,7 @@ fn encode(bytes: &[u8], mime: &str, url: &str) -> Result<IconData, String> {
 }
 
 /// 在一个 <link> 标签里取属性值
-fn attr(tag: &str, name: &str) -> Option<String> {
-    let lower = tag.to_ascii_lowercase();
+fn attr(tag: &str, name: &str) -> Option<String> {    let lower = tag.to_ascii_lowercase();
     let mut from = 0usize;
     while let Some(idx) = lower[from..].find(name) {
         let i = from + idx;
@@ -166,4 +182,28 @@ fn find_icon_href(html: &str) -> Option<String> {
         pos = end + 1;
     }
     best
+}
+
+#[cfg(test)]
+mod tests {
+    /// 需要联网。这条路径正是之前 panic 的地方：
+    /// ureq 的 TlsProvider 默认是 Rustls，而项目用的是 native-tls，
+    /// 不在 TlsConfig 里显式指定就会 panic（provider is Rustls but feature is not enabled）。
+    #[test]
+    #[ignore = "需要联网"]
+    fn fetches_icon_over_https_without_panicking() {
+        match super::fetch("https://github.com") {
+            Ok(icon) => {
+                assert!(!icon.data.is_empty(), "抓到的图标不应为空");
+                assert!(icon.mime.starts_with("image/"));
+            }
+            // 站点抓不到图标可以接受，但绝不允许 panic
+            Err(message) => assert!(!message.is_empty(), "失败时也应给出中文提示"),
+        }
+    }
+
+    #[test]
+    fn rejects_empty_input() {
+        assert!(super::fetch("   ").is_err());
+    }
 }

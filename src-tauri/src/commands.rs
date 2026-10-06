@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
 use crate::model::{AppData, IconData, ItemKind};
-use crate::{favicon, storage, winapi};
+use crate::{favicon, shortcut, storage, winapi};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -43,7 +43,8 @@ pub async fn open_item(kind: ItemKind, target: String) -> Result<(), String> {
     }
     let target = match kind {
         ItemKind::Url => normalize_url(&target),
-        ItemKind::App => target,
+        // 应用与文件都用系统默认程序打开
+        ItemKind::App | ItemKind::File => target,
     };
     tauri::async_runtime::spawn_blocking(move || winapi::shell_open(&target))
         .await
@@ -83,13 +84,13 @@ pub async fn fetch_favicon_icon(url: String) -> Result<IconData, String> {
         .map_err(|e| e.to_string())?
 }
 
-/// 检查所有「应用」条目的路径是否存在（网址条目不检查）
+/// 检查所有带本地路径的条目（应用与文件；网址跳过）
 #[tauri::command]
 pub async fn check_paths(items: Vec<ItemCheck>) -> Vec<MissingPath> {
     tauri::async_runtime::spawn_blocking(move || {
         items
             .into_iter()
-            .filter(|item| item.kind == ItemKind::App)
+            .filter(|item| item.kind != ItemKind::Url)
             .filter(|item| {
                 let target = item.target.trim();
                 target.is_empty() || !Path::new(target).exists()
@@ -117,6 +118,48 @@ pub async fn import_data(path: String) -> Result<AppData, String> {
     tauri::async_runtime::spawn_blocking(move || storage::import_from(&path))
         .await
         .map_err(|e| e.to_string())?
+}
+
+/// 解析快捷方式：.lnk 返回它指向的路径，.url 返回其中的网址，其它文件返回 null
+#[tauri::command]
+pub async fn resolve_target(path: String) -> Option<String> {
+    tauri::async_runtime::spawn_blocking(move || shortcut::resolve_launch_target(&path))
+        .await
+        .ok()
+        .flatten()
+}
+
+/// 隐藏区密码哈希：SHA-256(salt + 密码 + 固定后缀)，只把结果存进数据文件
+#[tauri::command]
+pub fn hash_password(password: String, salt: String) -> String {
+    use sha2::{Digest, Sha256};
+
+    let mut hasher = Sha256::new();
+    hasher.update(salt.as_bytes());
+    hasher.update(password.as_bytes());
+    hasher.update(b"quick-manage-vault-v1");
+    format!("{:x}", hasher.finalize())
+}
+
+/// 生成一个随机盐（16 字节的十六进制）
+#[tauri::command]
+pub fn make_salt() -> String {
+    use sha2::{Digest, Sha256};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    let mut hasher = Sha256::new();
+    hasher.update(now.as_nanos().to_le_bytes());
+    hasher.update(std::process::id().to_le_bytes());
+    hasher.update(
+        std::thread::current()
+            .name()
+            .unwrap_or("vault")
+            .as_bytes(),
+    );
+    format!("{:x}", hasher.finalize())[..32].to_string()
 }
 
 /// 当前数据文件位置（便携版在 exe 旁，安装版在 %APPDATA%）

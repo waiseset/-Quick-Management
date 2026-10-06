@@ -16,7 +16,7 @@ import type { ReactNode } from "react";
 
 import * as api from "./api";
 import { ALL_CATEGORY_ID, FAVORITES_CATEGORY_ID, emptyData } from "./types";
-import type { AppData, Category, Item, SubCategory, Theme, ViewKey } from "./types";
+import type { AppData, Category, Item, SubCategory, Theme, Vault, ViewKey } from "./types";
 import { sortByOrder, uid } from "./util";
 
 /* ------------------------------- reducer ------------------------------- */
@@ -28,7 +28,7 @@ type Action =
   | { type: "addCategory"; name: string }
   | { type: "renameCategory"; id: string; name: string }
   | { type: "removeCategory"; id: string; mode: "delete-items" | "keep-items" }
-  | { type: "addSubCategory"; categoryId: string; name: string }
+  | { type: "addSubCategory"; categoryId: string; id: string; name: string }
   | { type: "renameSubCategory"; categoryId: string; id: string; name: string }
   | {
       type: "removeSubCategory";
@@ -43,6 +43,7 @@ type Action =
   | { type: "removeItem"; id: string }
   | { type: "reorderItems"; ids: string[] }
   | { type: "setPermanentlyIgnored"; ids: string[] }
+  | { type: "setVault"; vault: Vault | null }
   | { type: "clearData" };
 
 function nextOrder(list: Array<{ order: number }>): number {
@@ -87,10 +88,10 @@ function reducer(state: AppData, action: Action): AppData {
       const categories = state.categories.filter((c) => c.id !== action.id);
       const items =
         action.mode === "delete-items"
-          ? state.items.filter((i) => i.categoryId !== action.id)
+          ? state.items.filter((i) => !i.categoryIds.includes(action.id))
           : state.items.map((i) =>
-              i.categoryId === action.id
-                ? { ...i, categoryId: null, subcategoryId: null }
+              i.categoryIds.includes(action.id)
+                ? { ...i, categoryIds: i.categoryIds.filter((id) => id !== action.id) }
                 : i,
             );
       return { ...state, categories, items };
@@ -99,11 +100,7 @@ function reducer(state: AppData, action: Action): AppData {
     case "addSubCategory": {
       const category = state.categories.find((c) => c.id === action.categoryId);
       if (!category) return state;
-      const sub: SubCategory = {
-        id: uid(),
-        name: action.name,
-        order: nextOrder(category.subcategories),
-      };
+      const sub: SubCategory = { id: action.id, name: action.name, order: nextOrder(category.subcategories) };
       return {
         ...state,
         categories: state.categories.map((c) =>
@@ -130,9 +127,11 @@ function reducer(state: AppData, action: Action): AppData {
     case "removeSubCategory": {
       const items =
         action.mode === "delete-items"
-          ? state.items.filter((i) => i.subcategoryId !== action.id)
+          ? state.items.filter((i) => !i.subcategoryIds.includes(action.id))
           : state.items.map((i) =>
-              i.subcategoryId === action.id ? { ...i, subcategoryId: null } : i,
+              i.subcategoryIds.includes(action.id)
+                ? { ...i, subcategoryIds: i.subcategoryIds.filter((id) => id !== action.id) }
+                : i,
             );
       return {
         ...state,
@@ -201,13 +200,16 @@ function reducer(state: AppData, action: Action): AppData {
     case "setPermanentlyIgnored":
       return { ...state, settings: { ...state.settings, permanentlyIgnored: action.ids } };
 
-    // 清空所有数据：分类、子分类、条目与忽略记录，主题等偏好保留
+    case "setVault":
+      return { ...state, settings: { ...state.settings, vault: action.vault } };
+
+    // 清空所有数据：分类、子分类、条目、忽略记录，以及隐藏区的密码
     case "clearData":
       return {
         ...state,
         categories: [],
         items: [],
-        settings: { ...state.settings, permanentlyIgnored: [] },
+        settings: { ...state.settings, permanentlyIgnored: [], vault: null },
       };
 
     default:
@@ -220,8 +222,11 @@ function reducer(state: AppData, action: Action): AppData {
 /** 复制 / 剪切的内部剪贴板，只在本次运行内有效 */
 export interface ClipboardEntry {
   mode: "copy" | "cut";
-  item: Item;
+  items: Item[];
 }
+
+/** 条目选中方式：replace = 普通单击，toggle = Ctrl+左键，range = Shift+左键 */
+export type SelectMode = "replace" | "toggle" | "range";
 
 interface AppContextValue {
   ready: boolean;
@@ -229,10 +234,14 @@ interface AppContextValue {
   categories: Category[];
   visibleItems: Item[];
   selectedItem: Item | null;
+  /** 当前选中的条目（可多选） */
+  selectedIds: string[];
   selectedCategoryId: string;
   /** 选中的二级分类名称：「全部」视图会把同名子分类合并成一个胶囊 */
   selectedSubCategoryName: string | null;
   view: ViewKey;
+  /** 隐藏区是否已解锁；离开隐藏页会自动重新上锁 */
+  vaultUnlocked: boolean;
   searchQuery: string;
   sessionIgnored: string[];
   permanentlyIgnored: string[];
@@ -242,7 +251,7 @@ interface AppContextValue {
   selectCategory: (id: string) => void;
   selectSubCategory: (name: string | null) => void;
   setSearchQuery: (query: string) => void;
-  selectItem: (id: string | null) => void;
+  selectItem: (id: string | null, mode?: SelectMode) => void;
   setTheme: (theme: Theme) => void;
   toggleFavorite: (id: string) => void;
   addCategory: (name: string) => void;
@@ -262,10 +271,15 @@ interface AppContextValue {
   restoreIgnored: (id: string) => void;
   clearData: () => void;
   replaceAll: (data: AppData) => void;
+  setVault: (vault: Vault | null) => void;
+  setVaultUnlocked: (value: boolean) => void;
   clipboard: ClipboardEntry | null;
-  copyItem: (id: string) => void;
-  cutItem: (id: string) => void;
-  pasteItem: () => void;
+  /** 本次运行内新建的二级分类 id（空的也先显示，重开应用才清理） */
+  sessionSubIds: string[];
+  copyItems: (ids: string[]) => void;
+  cutItems: (ids: string[]) => void;
+  /** 粘贴；targetHidden 为 true 时副本直接进入隐藏区（在隐藏页粘贴时用） */
+  pasteItems: (targetHidden?: boolean) => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -273,15 +287,22 @@ const AppContext = createContext<AppContextValue | null>(null);
 export function AppProvider({ children }: { children: ReactNode }) {
   const [data, dispatch] = useReducer(reducer, undefined, emptyData);
   const [ready, setReady] = useState(false);
-  const [view, setView] = useState<ViewKey>("main");
+  const [view, setViewState] = useState<ViewKey>("main");
+  // 解锁状态放全局：标题栏要据此决定是否显示选中条目的描述
+  const [vaultUnlocked, setVaultUnlockedState] = useState(false);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>(ALL_CATEGORY_ID);
   const [selectedSubCategoryName, setSelectedSubCategoryName] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  // 多选：selectedIds 是当前选中的全部条目，anchorId 记录范围选择的起点
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [anchorId, setAnchorId] = useState<string | null>(null);
   const [sessionIgnored, setSessionIgnored] = useState<string[]>([]);
   const [clipboard, setClipboard] = useState<ClipboardEntry | null>(null);
+  const [sessionSubIds, setSessionSubIds] = useState<string[]>([]);
   const [toast, setToast] = useState<string | null>(null);
   const saveTimer = useRef<number | null>(null);
+  const cleanedEmptySubs = useRef(false);
+  const cleanedDuplicates = useRef(false);
 
   // 启动时读取本地数据
   useEffect(() => {
@@ -302,9 +323,42 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // 自动保存（防抖）
+  // 启动后清掉完全重复的条目：类型 + 名称 + 路径都相同就只留一个
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || cleanedDuplicates.current) return;
+    cleanedDuplicates.current = true;
+    const seen = new Set<string>();
+    const duplicates: string[] = [];
+    for (const item of sortByOrder(data.items)) {
+      const key = `${item.kind}|${item.name}|${item.target}`;
+      if (seen.has(key)) duplicates.push(item.id);
+      else seen.add(key);
+    }
+    for (const id of duplicates) dispatch({ type: "removeItem", id });
+  }, [ready, data.items]);
+
+  // 启动后清掉没有任何条目的二级分类：
+  // 用户当次手动建了但没放东西的，重新打开应用就不再保留
+  useEffect(() => {
+    if (!ready || cleanedEmptySubs.current) return;
+    cleanedEmptySubs.current = true;
+    for (const category of data.categories) {
+      for (const sub of category.subcategories) {
+        const used = data.items.some((item) => item.subcategoryIds.includes(sub.id));
+        if (!used) {
+          dispatch({
+            type: "removeSubCategory",
+            categoryId: category.id,
+            id: sub.id,
+            mode: "keep-items",
+          });
+        }
+      }
+    }
+  }, [ready, data.categories, data.items]);
+
+  // 自动保存（防抖）
+  useEffect(() => {    if (!ready) return;
     if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => {
       api.saveData(data).catch(() => undefined);
@@ -338,7 +392,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const visibleItems = useMemo(() => {
     const keyword = searchQuery.trim().toLowerCase();
-    let list = data.items;
+    // 隐藏的条目只在「隐藏的元素」页里出现，其余视图一律看不到
+    let list =
+      view === "vault"
+        ? data.items.filter((item) => item.hidden)
+        : data.items.filter((item) => !item.hidden);
 
     if (keyword) {
       // 搜索：跨全部分类，名称或描述命中即可
@@ -351,80 +409,153 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (selectedCategoryId === FAVORITES_CATEGORY_ID) {
         list = list.filter((item) => item.favorite);
       } else if (selectedCategoryId !== ALL_CATEGORY_ID) {
-        list = list.filter((item) => item.categoryId === selectedCategoryId);
+        list = list.filter((item) => item.categoryIds.includes(selectedCategoryId));
       }
+      // 二级分类按名称筛选，条目可同时属于多个二级分类
       if (selectedSubCategoryName) {
-        list = list.filter(
-          (item) =>
-            item.subcategoryId !== null &&
-            subcategoryNameById.get(item.subcategoryId) === selectedSubCategoryName,
+        list = list.filter((item) =>
+          item.subcategoryIds.some(
+            (id) => subcategoryNameById.get(id) === selectedSubCategoryName,
+          ),
         );
       }
     }
-    return sortByOrder(list);
+    // 完全一致的条目（类型 + 名称 + 路径都一样）只显示一个
+    const seen = new Set<string>();
+    const unique = list.filter((item) => {
+      const key = `${item.kind}|${item.name}|${item.target}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    return sortByOrder(unique);
   }, [
     data.items,
     selectedCategoryId,
     selectedSubCategoryName,
     subcategoryNameById,
     searchQuery,
+    view,
   ]);
 
-  const selectedItem = useMemo(
-    () => data.items.find((item) => item.id === selectedItemId) ?? null,
-    [data.items, selectedItemId],
+  const selectedItem = useMemo(() => {
+    const id = selectedIds[selectedIds.length - 1];
+    return data.items.find((item) => item.id === id) ?? null;
+  }, [data.items, selectedIds]);
+
+  /** 选中：普通单击替换、Ctrl+左键切换单个、Shift+左键成片选中 */
+  const selectItem = useCallback(
+    (id: string | null, mode: SelectMode = "replace") => {
+      if (id === null) {
+        setSelectedIds([]);
+        setAnchorId(null);
+        return;
+      }
+      if (mode === "toggle") {
+        setSelectedIds((list) =>
+          list.includes(id) ? list.filter((entry) => entry !== id) : [...list, id],
+        );
+        setAnchorId(id);
+        return;
+      }
+      if (mode === "range" && anchorId) {
+        const order = visibleItems.map((item) => item.id);
+        const from = order.indexOf(anchorId);
+        const to = order.indexOf(id);
+        if (from >= 0 && to >= 0) {
+          const [start, end] = from <= to ? [from, to] : [to, from];
+          setSelectedIds(order.slice(start, end + 1));
+          return;
+        }
+      }
+      setSelectedIds([id]);
+      setAnchorId(id);
+    },
+    [anchorId, visibleItems],
   );
+
+  /** 切换视图：清空选中（跨视图的选择没有意义），离开隐藏页立即重新上锁 */
+  const setView = useCallback((next: ViewKey) => {
+    setViewState(next);
+    setSelectedIds([]);
+    setAnchorId(null);
+    if (next !== "vault") setVaultUnlockedState(false);
+  }, []);
+
+  /** 解锁 / 上锁；上锁时清空选中，避免选择状态泄漏到其它页面 */
+  const setVaultUnlocked = useCallback((value: boolean) => {
+    setVaultUnlockedState(value);
+    if (!value) {
+      setSelectedIds([]);
+      setAnchorId(null);
+    }
+  }, []);
 
   const selectCategory = useCallback((id: string) => {
     setSelectedCategoryId(id);
     setSelectedSubCategoryName(null);
-    setSelectedItemId(null);
+    setSelectedIds([]);
+    setAnchorId(null);
     setView("main");
   }, []);
 
-  const copyItem = useCallback(
-    (id: string) => {
-      const item = data.items.find((entry) => entry.id === id);
-      if (item) setClipboard({ mode: "copy", item });
+  const copyItems = useCallback(
+    (ids: string[]) => {
+      const items = data.items.filter((entry) => ids.includes(entry.id));
+      if (items.length) setClipboard({ mode: "copy", items });
     },
     [data.items],
   );
 
-  const cutItem = useCallback(
-    (id: string) => {
-      const item = data.items.find((entry) => entry.id === id);
-      if (item) setClipboard({ mode: "cut", item });
+  const cutItems = useCallback(
+    (ids: string[]) => {
+      const items = data.items.filter((entry) => ids.includes(entry.id));
+      if (items.length) setClipboard({ mode: "cut", items });
     },
     [data.items],
   );
 
-  /** 粘贴：生成一份新条目；若来自剪切，则粘贴成功后删除原条目 */
-  const pasteItem = useCallback(() => {
-    if (!clipboard) return;
-    const inCategory =
-      selectedCategoryId !== ALL_CATEGORY_ID && selectedCategoryId !== FAVORITES_CATEGORY_ID;
-    const order = data.items.reduce((max, entry) => Math.max(max, entry.order + 1), 0);
-    // 二级分类按名称记录，这里换算回目标分类下的具体 id
-    const targetSubcategoryId =
-      inCategory && selectedSubCategoryName
-        ? (data.categories
-            .find((entry) => entry.id === selectedCategoryId)
-            ?.subcategories.find((sub) => sub.name === selectedSubCategoryName)?.id ?? null)
-        : clipboard.item.subcategoryId;
-    const copy: Item = {
-      ...clipboard.item,
-      id: uid(),
-      categoryId: inCategory ? selectedCategoryId : clipboard.item.categoryId,
-      subcategoryId: targetSubcategoryId,
-      order,
-      createdAt: Date.now(),
-    };
-    dispatch({ type: "addItem", item: copy });
-    if (clipboard.mode === "cut") {
-      dispatch({ type: "removeItem", id: clipboard.item.id });
-      setClipboard(null);
-    }
-  }, [clipboard, data.items, selectedCategoryId, selectedSubCategoryName]);
+  /**
+   * 粘贴：为剪贴板里每一项生成副本；若来自剪切，粘贴成功后删除原件。
+   * targetHidden 决定副本落在哪一层：主视图粘贴是普通条目，隐藏页粘贴直接进隐藏区。
+   */
+  const pasteItems = useCallback(
+    (targetHidden = false) => {
+      if (!clipboard) return;
+      const inCategory =
+        selectedCategoryId !== ALL_CATEGORY_ID && selectedCategoryId !== FAVORITES_CATEGORY_ID;
+      // 二级分类按名称记录，这里换算回目标分类下的具体 id
+      const targetSubcategoryId =
+        inCategory && selectedSubCategoryName
+          ? (data.categories
+              .find((entry) => entry.id === selectedCategoryId)
+              ?.subcategories.find((sub) => sub.name === selectedSubCategoryName)?.id ?? null)
+          : null;
+      let order = data.items.reduce((max, entry) => Math.max(max, entry.order + 1), 0);
+      for (const source of clipboard.items) {
+        const copy: Item = {
+          ...source,
+          id: uid(),
+          // 粘贴出来的副本跟着「当前所在的页面」走
+          hidden: targetHidden,
+          categoryIds: inCategory ? [selectedCategoryId] : source.categoryIds,
+          subcategoryIds: inCategory
+            ? targetSubcategoryId
+              ? [targetSubcategoryId]
+              : []
+            : source.subcategoryIds,
+          order: order++,
+          createdAt: Date.now(),
+        };
+        dispatch({ type: "addItem", item: copy });
+      }
+      if (clipboard.mode === "cut") {
+        for (const source of clipboard.items) dispatch({ type: "removeItem", id: source.id });
+        setClipboard(null);
+      }
+    },
+    [clipboard, data.items, data.categories, selectedCategoryId, selectedSubCategoryName],
+  );
 
   const value: AppContextValue = {
     ready,
@@ -432,6 +563,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     categories,
     visibleItems,
     selectedItem,
+    selectedIds,
     selectedCategoryId,
     selectedSubCategoryName,
     view,
@@ -441,6 +573,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     toast,
     showToast: setToast,
     setView,
+    vaultUnlocked,
+    setVaultUnlocked,
     selectCategory,
     // 点击二级分类时回到主视图，否则在提醒 / 数据管理等页面点胶囊看不到结果
     selectSubCategory: (name) => {
@@ -449,13 +583,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setView("main");
     },
     setSearchQuery,
-    selectItem: setSelectedItemId,
+    selectItem,
     setTheme: (theme) => dispatch({ type: "setTheme", theme }),
     toggleFavorite: (id) => dispatch({ type: "toggleFavorite", id }),
     addCategory: (name) => dispatch({ type: "addCategory", name }),
     renameCategory: (id, name) => dispatch({ type: "renameCategory", id, name }),
     removeCategory: (id, mode) => dispatch({ type: "removeCategory", id, mode }),
-    addSubCategory: (categoryId, name) => dispatch({ type: "addSubCategory", categoryId, name }),
+    addSubCategory: (categoryId, name) => {
+      // id 在这里生成，同时记下「本次运行内新建」，空的也先显示出来
+      const id = uid();
+      setSessionSubIds((list) => [...list, id]);
+      dispatch({ type: "addSubCategory", categoryId, id, name });
+    },
     renameSubCategory: (categoryId, id, name) =>
       dispatch({ type: "renameSubCategory", categoryId, id, name }),
     removeSubCategory: (categoryId, id, mode) =>
@@ -482,8 +621,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }),
     clearData: () => {
       dispatch({ type: "clearData" });
+      // 密码一起被清掉了，解锁状态也要归零
+      setVaultUnlockedState(false);
       setSelectedSubCategoryName(null);
-      setSelectedItemId(null);
+      setSelectedIds([]);
+      setAnchorId(null);
       setSessionIgnored([]);
       setClipboard(null);
       setSearchQuery("");
@@ -492,15 +634,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "load", data: next });
       setSelectedCategoryId(ALL_CATEGORY_ID);
       setSelectedSubCategoryName(null);
-      setSelectedItemId(null);
+      setSelectedIds([]);
+      setAnchorId(null);
       setSessionIgnored([]);
       setClipboard(null);
       setSearchQuery("");
     },
     clipboard,
-    copyItem,
-    cutItem,
-    pasteItem,
+    sessionSubIds,
+    setVault: (vault) => dispatch({ type: "setVault", vault }),
+    copyItems,
+    cutItems,
+    pasteItems,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

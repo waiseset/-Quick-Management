@@ -24,7 +24,25 @@ export function iconSrc(icon: IconData | null | undefined): string | null {
 }
 
 export function itemKindLabel(kind: ItemKind): string {
-  return kind === "app" ? "应用" : "网址";
+  if (kind === "app") return "应用";
+  if (kind === "file") return "文件";
+  return "网址";
+}
+
+/** 含扩展名的文件名，文件类条目用它作默认名称 */
+export function fileName(path: string): string {
+  const parts = path.split(/[\\/]/);
+  return parts[parts.length - 1] || path;
+}
+
+/** 去重键：类型 + 名称 + 路径都一致视为同一条 */
+export function uniqueKey(item: { kind: string; name: string; target: string }): string {
+  return `${item.kind}|${item.name}|${item.target}`;
+}
+
+/** 统计条目数量时把完全重复的算作一个 */
+export function countUnique(items: Array<{ kind: string; name: string; target: string }>): number {
+  return new Set(items.map(uniqueKey)).size;
 }
 
 /** 从完整路径里取文件名（去掉扩展名），用于自动填充条目名称 */
@@ -57,6 +75,12 @@ export function ellipsis(text: string, max = 48): string {
   if (text.length <= max) return text;
   return `${text.slice(0, max - 1)}…`;
 }
+
+/** 应用版本号（显示用；打包版本号见 tauri.conf.json） */
+export const APP_VERSION = "3.2";
+
+/** 项目主页 */
+export const PROJECT_URL = "https://github.com/waiseset/Quick-Management";
 
 /** 常用应用后缀 -> 选择文件时使用的过滤器 */
 export const EXE_FILTER = ["exe", "lnk", "bat", "cmd"];

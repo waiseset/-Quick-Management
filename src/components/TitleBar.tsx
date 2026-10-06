@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { isTauri } from "../api";
@@ -7,9 +7,20 @@ import { useContextMenu } from "./ContextMenu";
 
 /** 参考文档：左上角标题（点击弹出菜单）、右上角 最小化/最大化/关闭 符号 */
 export function TitleBar() {
-  const { data, setTheme, selectedItem, view, setView, searchQuery, setSearchQuery } = useApp();
+  const {
+    data,
+    setTheme,
+    selectedItem,
+    selectedIds,
+    view,
+    setView,
+    searchQuery,
+    setSearchQuery,
+    vaultUnlocked,
+  } = useApp();
   const { open } = useContextMenu();
   const [maximized, setMaximized] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -29,6 +40,24 @@ export function TitleBar() {
     };
   }, []);
 
+  /**
+   * Ctrl+F：把焦点交给标题栏的搜索框。
+   * 提醒 / 数据管理 / 关于页先回主视图（搜索结果显示在条目网格里），隐藏页则原地聚焦。
+   */
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "f") return;
+      event.preventDefault();
+      if (view !== "main" && view !== "vault") setView("main");
+      const input = searchRef.current;
+      if (!input) return;
+      input.focus();
+      input.select();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [view, setView]);
+
   const toggleMaximize = async () => {
     if (!isTauri()) return;
     await getCurrentWindow().toggleMaximize();
@@ -42,6 +71,7 @@ export function TitleBar() {
       y: rect.bottom + 6,
       items: [
         { key: "reminder", label: "提醒", onSelect: () => setView("reminder") },
+        { key: "vault", label: "隐藏的元素", onSelect: () => setView("vault") },
         { key: "data", label: "数据管理", onSelect: () => setView("data") },
         {
           key: "theme",
@@ -54,9 +84,13 @@ export function TitleBar() {
   };
 
   const description =
-    view === "main"
-      ? selectedItem?.description?.trim() || (selectedItem ? "该条目还没有描述" : "")
-      : "";
+    view !== "main" && !(view === "vault" && vaultUnlocked)
+      ? ""
+      : selectedIds.length > 1
+        ? `已选中 ${selectedIds.length} 个条目`
+        : selectedItem
+          ? `描述：${selectedItem.description.trim() || "（未填写）"}`
+          : "";
 
   return (
     <header className="titlebar" data-tauri-drag-region>
@@ -86,6 +120,7 @@ export function TitleBar() {
           <path d="M10.8 10.8 14 14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
         </svg>
         <input
+          ref={searchRef}
           className="titlebar-search-input"
           value={searchQuery}
           placeholder="搜索名称或描述"

@@ -31,6 +31,7 @@ export function SubCategoryBar() {
     reorderSubCategories,
     data,
     view,
+    sessionSubIds,
   } = useApp();
   const { open } = useContextMenu();
   const { prompt, choose } = useUi();
@@ -40,15 +41,22 @@ export function SubCategoryBar() {
   const isMain = view === "main";
 
   const chips = useMemo<ChipEntry[]>(() => {
+    // 没有任何条目的二级分类不显示；本次运行内刚建的先留着，重开应用时才清理
+    const keep = (id: string) =>
+      data.items.some((item) => item.subcategoryIds.includes(id)) || sessionSubIds.includes(id);
+
     if (category) {
-      return sortByOrder(category.subcategories).map((sub) => ({
-        name: sub.name,
-        refs: [{ id: sub.id, categoryId: category.id, categoryName: category.name }],
-      }));
+      return sortByOrder(category.subcategories)
+        .filter((sub) => keep(sub.id))
+        .map((sub) => ({
+          name: sub.name,
+          refs: [{ id: sub.id, categoryId: category.id, categoryName: category.name }],
+        }));
     }
     const merged = new Map<string, ChipEntry>();
     for (const entry of categories) {
       for (const sub of sortByOrder(entry.subcategories)) {
+        if (!keep(sub.id)) continue;
         const ref = { id: sub.id, categoryId: entry.id, categoryName: entry.name };
         const found = merged.get(sub.name);
         if (found) found.refs.push(ref);
@@ -56,13 +64,17 @@ export function SubCategoryBar() {
       }
     }
     return [...merged.values()];
-  }, [category, categories]);
+  }, [category, categories, data.items, sessionSubIds]);
 
   // 聚合视图的胶囊顺序跨分类，拖拽排序没有意义，只在具体分类下启用
   const ids = category ? chips.map((entry) => entry.refs[0].id) : [];
-  const { handlers, containerProps, activeId, overId } = useDragList<HTMLDivElement>(ids, (next) => {
-    if (category) reorderSubCategories(category.id, next);
-  });
+  const { handlers, activeId, overId, consumeDragClick } = useDragList(
+    ids,
+    (next) => {
+      if (category) reorderSubCategories(category.id, next);
+    },
+    category !== null,
+  );
 
   const promptCreate = (categoryId: string, categoryName: string) => {
     prompt({
@@ -123,8 +135,8 @@ export function SubCategoryBar() {
   /** 删除子分类同样要交代它下面的条目 */
   const requestDelete = (entry: ChipEntry) => {
     const subIds = new Set(entry.refs.map((ref) => ref.id));
-    const count = data.items.filter(
-      (item) => item.subcategoryId !== null && subIds.has(item.subcategoryId),
+    const count = data.items.filter((item) =>
+      item.subcategoryIds.some((id) => subIds.has(id)),
     ).length;
     const scope =
       entry.refs.length > 1
@@ -200,7 +212,6 @@ export function SubCategoryBar() {
           items: [{ key: "add", label: "添加", onSelect: requestCreate }],
         });
       }}
-      {...containerProps}
     >
       <button
         type="button"
@@ -213,6 +224,7 @@ export function SubCategoryBar() {
       {chips.map((entry) => (
         <div
           key={entry.name}
+          data-drag-id={category ? entry.refs[0].id : undefined}
           title={
             entry.refs.length > 1
               ? `${entry.refs.map((ref) => ref.categoryName).join("、")}（同名已合并）`
@@ -225,7 +237,10 @@ export function SubCategoryBar() {
             activeId === entry.refs[0].id && "is-dragging",
             overId === entry.refs[0].id && "is-drop-target",
           )}
-          onClick={() => selectSubCategory(entry.name)}
+          onClick={() => {
+            if (consumeDragClick()) return;
+            selectSubCategory(entry.name);
+          }}
           onContextMenu={(event) => openSubMenu(event, entry)}
           {...(category ? handlers(entry.refs[0].id) : {})}
         >

@@ -1,6 +1,6 @@
 [package]
 name = "quick-manage"
-version = "1.0.0"
+version = "3.2.0"
 description = "快捷管理 - 本地应用与网址快捷方式管理器"
 authors = ["waiseset"]
 edition = "2021"
@@ -19,6 +19,7 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 base64 = "0.23"
 image = { version = "0.25", default-features = false, features = [
   "png",
@@ -31,9 +32,12 @@ image = { version = "0.25", default-features = false, features = [
 # native-tls = Windows SChannel，避免 rustls 的 ring/aws-lc 额外构建依赖
 ureq = { version = "3", default-features = false, features = ["native-tls", "gzip", "charset"] }
 url = "2"
+# 直接改 WebView2 的 ICoreWebView2Settings3（关闭浏览器快捷键，见 lib.rs）
+webview2-com = "0.39"
 windows = { version = "0.62", features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",
+  "Win32_Storage_FileSystem",
   "Win32_System_Com",
   "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",

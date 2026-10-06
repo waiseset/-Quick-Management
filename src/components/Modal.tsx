@@ -14,9 +14,24 @@ export function Modal({
   width?: number;
   onClose: () => void;
 }) {
+  const boxRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        onClose();
+        return;
+      }
+      // 回车 = 确定（点主按钮）；Shift + 回车留给多行输入换行
+      if (event.key === "Enter" && !event.shiftKey) {
+        const primary = boxRef.current?.querySelector<HTMLButtonElement>(
+          ".modal-foot .btn-primary:not(:disabled), .modal-foot .btn-danger:not(:disabled)",
+        );
+        if (primary) {
+          event.preventDefault();
+          primary.click();
+        }
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -29,7 +44,7 @@ export function Modal({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="modal" style={{ width }}>
+      <div className="modal" ref={boxRef} style={{ width }}>
         <header className="modal-head">
           <h3>{title}</h3>
           <button type="button" className="icon-button" onClick={onClose} aria-label="关闭">
@@ -100,9 +115,6 @@ export function PromptDialog({
           placeholder={placeholder}
           maxLength={40}
           onChange={(event) => setValue(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") submit();
-          }}
         />
       </label>
     </Modal>
