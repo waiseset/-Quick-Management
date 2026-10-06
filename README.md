@@ -10,8 +10,8 @@ Windows 桌面端的**本地快捷方式管理器**：把常用的应用、网�
 
 | 版本 | 文件 | 说明 |
 | --- | --- | --- |
-| 安装版 | [`快捷管理_3.2.0_x64-setup.exe`](./docs/releases/快捷管理_3.2.0_x64-setup.exe) | 双击按向导安装，装到当前用户目录，**不需要管理员权限**；会创建开始菜单与桌面快捷方式 |
-| 便携版 | [`快捷管理-便携版.zip`](./docs/releases/快捷管理-便携版.zip) | 解压即用，数据写在程序旁边的 `data\` 目录，可放 U 盘随身携带 |
+| 安装版 | [`快捷管理_3.2_x64-setup.exe`](./docs/releases/快捷管理_3.2_x64-setup.exe) | 双击按向导安装，装到当前用户目录，**不需要管理员权限**；会创建开始菜单与桌面快捷方式 |
+| 便携版 | [`快捷管理-便携版-3.2.zip`](./docs/releases/快捷管理-便携版-3.2.zip) | 解压即用，数据写在程序旁边的 `data\` 目录，可放 U 盘随身携带 |
 
 系统要求：Windows 10 / 11（依赖系统自带的 WebView2 运行时，一般无需额外安装）。
 
@@ -66,7 +66,7 @@ npm run tauri build
 产物位置：
 
 - 可执行文件：`src-tauri/target/release/quick-manage.exe`
-- 安装包：`src-tauri/target/release/bundle/nsis/快捷管理_3.2.0_x64-setup.exe`
+- 安装包：`src-tauri/target/release/bundle/nsis/快捷管理_3.2_x64-setup.exe`
 
 **自制便携版**：把 `quick-manage.exe` 与一个空的 `portable.txt` 放进同一个目录即可 ——
 程序检测到该标记后会把数据写到旁边的 `data\` 里，不再使用 `%APPDATA%`。
@@ -79,7 +79,8 @@ npm run tauri build
 ### 版本号约定
 
 `tauri.conf.json` 与 `Cargo.toml` 里的版本必须是三段式 semver（Tauri 会校验），
-所以打包版本是 `3.2.0`、安装包文件名也带 `_3.2.0_`；界面上显示的是 `3.2`。
+所以构建出来的安装包默认叫 `快捷管理_3.2.0_x64-setup.exe`；
+**发布时统一改成 X.X 形式**（`快捷管理_3.2_x64-setup.exe`、`快捷管理-便携版-3.2.zip`），界面上显示的是 `3.2`。
 
 ## 技术栈
 
